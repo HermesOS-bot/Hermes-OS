@@ -10,6 +10,9 @@ venv/
 # macOS
 .DS_Store
 
+# Generated market data
+/data/
+
 # Pytest cache
 .pytest_cache/
 
