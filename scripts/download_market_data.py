@@ -42,6 +42,12 @@ def load_token() -> str:
     return ""
 
 
+def deduplicate_candles(candles: Iterable[Candle]) -> List[Candle]:
+    """Keep one candle per timestamp when adjacent API chunks overlap."""
+    by_timestamp = {candle.timestamp: candle for candle in candles}
+    return sorted(by_timestamp.values(), key=lambda candle: candle.timestamp)
+
+
 def validate_candles(candles: Iterable[Candle]) -> List[Candle]:
     result = sorted(candles, key=lambda candle: candle.timestamp)
     timestamps = set()
@@ -59,7 +65,7 @@ def validate_candles(candles: Iterable[Candle]) -> List[Candle]:
 
 
 def save_csv(path: Path, candles: Iterable[Candle]) -> int:
-    rows = validate_candles(candles)
+    rows = validate_candles(deduplicate_candles(candles))
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as file:
         writer = csv.writer(file)
@@ -78,6 +84,32 @@ def save_csv(path: Path, candles: Iterable[Candle]) -> int:
     return len(rows)
 
 
+def download_in_chunks(
+    client: TBankMarketDataClient,
+    interval: str,
+    from_time: datetime,
+    to_time: datetime,
+    chunk_size: timedelta,
+) -> List[Candle]:
+    candles = []
+    chunk_start = from_time
+    request_count = 0
+    while chunk_start < to_time:
+        chunk_end = min(chunk_start + chunk_size, to_time)
+        candles.extend(
+            client.get_candles(
+                instrument_id=BTC_NEO_UID,
+                interval=interval,
+                from_time=chunk_start,
+                to_time=chunk_end,
+            )
+        )
+        request_count += 1
+        print(interval, "chunk", request_count, "complete")
+        chunk_start = chunk_end
+    return deduplicate_candles(candles)
+
+
 def main() -> int:
     token = load_token()
     if not token:
@@ -90,21 +122,24 @@ def main() -> int:
         (
             "BTCUSDperpA_5min.csv",
             "CANDLE_INTERVAL_5_MIN",
-            now - timedelta(days=7),
+            now - timedelta(days=89),
+            timedelta(days=7),
         ),
         (
             "BTCUSDperpA_1hour.csv",
             "CANDLE_INTERVAL_HOUR",
             now - timedelta(days=89),
+            timedelta(days=89),
         ),
     ]
 
-    for filename, interval, from_time in datasets:
-        candles = client.get_candles(
-            instrument_id=BTC_NEO_UID,
+    for filename, interval, from_time, chunk_size in datasets:
+        candles = download_in_chunks(
+            client=client,
             interval=interval,
             from_time=from_time,
             to_time=now,
+            chunk_size=chunk_size,
         )
         count = save_csv(DATA_DIR / filename, candles)
         print(filename, count, "complete candles")

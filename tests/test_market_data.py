@@ -8,7 +8,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from core.models import Candle
-from download_market_data import validate_candles
+from download_market_data import deduplicate_candles, validate_candles
 from infrastructure.tbank_market_data import quotation_to_float
 
 
@@ -51,6 +51,17 @@ class CandleValidationTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             validate_candles([candle, candle])
+
+    def test_deduplicates_overlapping_api_chunks(self):
+        candle = Candle(
+            timestamp=datetime(2026, 7, 24, 10, tzinfo=timezone.utc),
+            open=100,
+            high=102,
+            low=99,
+            close=101,
+            volume=12,
+        )
+        self.assertEqual(deduplicate_candles([candle, candle]), [candle])
 
 
 if __name__ == "__main__":
