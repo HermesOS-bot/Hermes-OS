@@ -6,6 +6,9 @@
 - Basic application entrypoint
 
 ## v0.2
+- T-Bank Invest API authentication test
+- Instrument discovery: find the BTC-linked NEO asset and record its ticker and identifiers
+- Historical candle request for the selected instrument
 - Market observer
 - Data ingestion pipeline
 
