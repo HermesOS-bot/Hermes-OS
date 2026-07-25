@@ -9,6 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from core.paper_observer import PaperSignal, format_signal_message, hypothetical_entry, stop_price
+from core.paper_outcomes import evaluate_path
 from infrastructure.paper_journal import PaperJournal
 from infrastructure.tbank_market_data import TBankMarketDataClient
 
@@ -65,6 +66,19 @@ class PaperJournalTests(unittest.TestCase):
                 self.assertFalse(journal.telegram_was_sent(signal.key))
                 journal.mark_telegram_sent(signal.key)
                 self.assertTrue(journal.telegram_was_sent(signal.key))
+                tracked = journal.tracked_signals()
+                self.assertEqual(len(tracked), 1)
+                outcome = evaluate_path(
+                    tracked[0], [], tracked[0].observed_at
+                )
+                journal.save_path_outcome(signal.key, outcome)
+                self.assertFalse(
+                    journal.outcome_notification_was_sent(signal.key, final=False)
+                )
+                journal.mark_outcome_notification_sent(signal.key, final=False)
+                self.assertTrue(
+                    journal.outcome_notification_was_sent(signal.key, final=False)
+                )
             finally:
                 journal.close()
 
