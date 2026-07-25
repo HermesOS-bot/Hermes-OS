@@ -1,17 +1,40 @@
-"""Read-only access to historical candles from T-Bank Invest API."""
+"""Read-only access to candles and order-book quotes from T-Bank Invest API."""
 
 import json
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 from urllib.request import Request, urlopen
 
 from core.models import Candle
 
 
-API_URL = (
-    "https://invest-public-api.tinkoff.ru/rest/"
-    "tinkoff.public.invest.api.contract.v1.MarketDataService/GetCandles"
+API_ROOT = "https://invest-public-api.tinkoff.ru/rest/"
+CANDLES_API_URL = (
+    API_ROOT + "tinkoff.public.invest.api.contract.v1.MarketDataService/GetCandles"
 )
+ORDER_BOOK_API_URL = (
+    API_ROOT + "tinkoff.public.invest.api.contract.v1.MarketDataService/GetOrderBook"
+)
+
+
+@dataclass(frozen=True)
+class OrderBookSnapshot:
+    best_bid: Optional[float]
+    best_ask: Optional[float]
+
+    @property
+    def midpoint(self) -> Optional[float]:
+        if self.best_bid is None or self.best_ask is None:
+            return None
+        return (self.best_bid + self.best_ask) / 2
+
+    @property
+    def spread_fraction(self) -> Optional[float]:
+        midpoint = self.midpoint
+        if midpoint is None or midpoint <= 0:
+            return None
+        return (self.best_ask - self.best_bid) / midpoint
 
 
 def quotation_to_float(value: Dict[str, object]) -> float:
@@ -25,6 +48,21 @@ class TBankMarketDataClient:
         if not token:
             raise ValueError("T-Bank API token is required")
         self._token = token
+
+    def _post(self, url: str, payload: Dict[str, object]) -> Dict[str, object]:
+        request = Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": "Bearer " + self._token,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "x-app-name": "HermesOS.market-data",
+            },
+        )
+        with urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
 
     def get_candles(
         self,
@@ -41,19 +79,7 @@ class TBankMarketDataClient:
             "interval": interval,
             "limit": limit,
         }
-        request = Request(
-            API_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            method="POST",
-            headers={
-                "Authorization": "Bearer " + self._token,
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "x-app-name": "HermesOS.market-data",
-            },
-        )
-        with urlopen(request, timeout=30) as response:
-            body = json.loads(response.read().decode("utf-8"))
+        body = self._post(CANDLES_API_URL, payload)
 
         candles = []
         for item in body.get("candles", []):
@@ -70,3 +96,16 @@ class TBankMarketDataClient:
                 )
             )
         return candles
+
+    def get_order_book(self, instrument_id: str, depth: int = 1) -> OrderBookSnapshot:
+        """Return the current best bid and ask without placing any orders."""
+        body = self._post(
+            ORDER_BOOK_API_URL,
+            {"instrumentId": instrument_id, "depth": depth},
+        )
+        bids = body.get("bids", [])
+        asks = body.get("asks", [])
+        return OrderBookSnapshot(
+            best_bid=quotation_to_float(bids[0]["price"]) if bids else None,
+            best_ask=quotation_to_float(asks[0]["price"]) if asks else None,
+        )

@@ -1,1 +1,1 @@
-# Add Python dependencies here
+httpx[socks]>=0.28,<0.29
