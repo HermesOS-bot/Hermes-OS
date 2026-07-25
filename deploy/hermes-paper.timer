@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Hermes OS paper observer every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+RandomizedDelaySec=3
+Unit=hermes-paper.service
+
+[Install]
+WantedBy=timers.target

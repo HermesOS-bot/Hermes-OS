@@ -1,0 +1,22 @@
+[Unit]
+Description=Hermes OS read-only paper observer cycle
+After=network-online.target tor@default.service
+Wants=network-online.target tor@default.service
+
+[Service]
+Type=oneshot
+User=hermes
+Group=hermes
+WorkingDirectory=/opt/hermes-os
+EnvironmentFile=/etc/hermes-os.env
+ExecStart=/opt/hermes-os/venv/bin/python /opt/hermes-os/scripts/run_paper_observer.py
+ExecStart=/opt/hermes-os/venv/bin/python /opt/hermes-os/scripts/update_paper_outcomes.py
+TimeoutStartSec=55
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/hermes-os/data
+
+[Install]
+WantedBy=multi-user.target
