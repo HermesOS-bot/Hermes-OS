@@ -22,6 +22,13 @@ class PaperSignal:
     hourly_context: str
     ema_50_hourly: Optional[float]
     ema_200_hourly: Optional[float]
+    session_open: float
+    session_high: float
+    session_low: float
+    session_return: float
+    session_range_position: Optional[float]
+    session_vwap: Optional[float]
+    price_vs_session_vwap: Optional[float]
 
     @property
     def key(self) -> str:
@@ -60,6 +67,48 @@ def _hourly_context(hourly: List[Candle], observed_at: datetime):
     return context, fast, slow
 
 
+def _session_context(candles: List[Candle], signal_candle: Candle):
+    session_date = signal_candle.timestamp.astimezone(MOSCOW).date()
+    session = [
+        candle
+        for candle in candles
+        if candle.timestamp <= signal_candle.timestamp
+        and candle.timestamp.astimezone(MOSCOW).date() == session_date
+    ]
+    session_open = session[0].open
+    session_high = max(candle.high for candle in session)
+    session_low = min(candle.low for candle in session)
+    session_return = signal_candle.close / session_open - 1
+    session_range = session_high - session_low
+    range_position = (
+        (signal_candle.close - session_low) / session_range
+        if session_range > 0
+        else None
+    )
+    total_volume = sum(candle.volume for candle in session)
+    session_vwap = (
+        sum(
+            ((candle.high + candle.low + candle.close) / 3) * candle.volume
+            for candle in session
+        )
+        / total_volume
+        if total_volume > 0
+        else None
+    )
+    price_vs_vwap = (
+        signal_candle.close / session_vwap - 1 if session_vwap else None
+    )
+    return (
+        session_open,
+        session_high,
+        session_low,
+        session_return,
+        range_position,
+        session_vwap,
+        price_vs_vwap,
+    )
+
+
 def detect_latest_signal(
     five_minute: List[Candle], hourly: List[Candle]
 ) -> Optional[PaperSignal]:
@@ -75,6 +124,15 @@ def detect_latest_signal(
     candle = candles[-1]
     observed_at = candle.timestamp + timedelta(minutes=5)
     context, fast, slow = _hourly_context(hourly, observed_at)
+    (
+        session_open,
+        session_high,
+        session_low,
+        session_return,
+        range_position,
+        session_vwap,
+        price_vs_vwap,
+    ) = _session_context(candles, candle)
     return PaperSignal(
         candle_time=candle.timestamp,
         observed_at=observed_at,
@@ -85,6 +143,13 @@ def detect_latest_signal(
         hourly_context=context,
         ema_50_hourly=fast,
         ema_200_hourly=slow,
+        session_open=session_open,
+        session_high=session_high,
+        session_low=session_low,
+        session_return=session_return,
+        session_range_position=range_position,
+        session_vwap=session_vwap,
+        price_vs_session_vwap=price_vs_vwap,
     )
 
 
@@ -108,7 +173,11 @@ def format_signal_message(
     entry = hypothetical_entry(signal, best_bid, best_ask)
     stop = stop_price(signal, entry)
     is_long = signal.side == "long_candidate"
-    title = "🟢 КАНДИДАТ НА ЛОНГ" if is_long else "🔴 КАНДИДАТ НА ШОРТ"
+    title = (
+        "🟢 КРАТКОСРОЧНЫЙ ОТСКОК ВВЕРХ"
+        if is_long
+        else "🔴 КРАТКОСРОЧНАЯ КОРРЕКЦИЯ ВНИЗ"
+    )
     context = {
         "bullish": "восходящий",
         "bearish": "нисходящий",
@@ -121,6 +190,26 @@ def format_signal_message(
         else "{:.2f}× среднего".format(signal.relative_volume_20)
     )
     time_moscow = signal.observed_at.astimezone(MOSCOW).strftime("%d.%m.%Y %H:%M мск")
+    if abs(signal.session_return) < 0.0001:
+        alignment = "движение сессии пока нейтральное"
+    elif (is_long and signal.session_return > 0) or (
+        not is_long and signal.session_return < 0
+    ):
+        alignment = "по движению сессии"
+    else:
+        alignment = "против движения сессии"
+    range_position = (
+        "нет данных"
+        if signal.session_range_position is None
+        else "{:.0%} от минимума к максимуму".format(
+            signal.session_range_position
+        )
+    )
+    vwap_distance = (
+        "нет данных"
+        if signal.price_vs_session_vwap is None
+        else "{:+.2%}".format(signal.price_vs_session_vwap)
+    )
     return "\n".join(
         [
             title + " — NEO Bitcoin",
@@ -128,12 +217,17 @@ def format_signal_message(
             "Время: " + time_moscow,
             "RSI 14: {:.1f}".format(signal.rsi_14),
             "Часовой контекст: " + context,
+            "Сессия от открытия: {:+.2%}".format(signal.session_return),
+            "Положение в диапазоне: " + range_position,
+            "Цена относительно VWAP: " + vwap_distance,
+            "Сигнал: " + alignment,
             "Относительный объём: " + volume,
             "Bid / Ask: {:,.2f} / {:,.2f}".format(best_bid, best_ask),
             "Спред: {:.3%}".format(spread),
             "Условный вход: {:,.2f}".format(entry),
             "Стоп-сценарий 1%: {:,.2f}".format(stop),
             "",
+            "Локальный RSI-сигнал на 15–60 минут, не прогноз разворота дня.",
             "Paper-наблюдение. Реальная сделка не открыта.",
         ]
     )

@@ -26,6 +26,13 @@ class PaperSignalTests(unittest.TestCase):
             hourly_context="bullish",
             ema_50_hourly=101.0,
             ema_200_hourly=99.0,
+            session_open=98.0,
+            session_high=102.0,
+            session_low=97.0,
+            session_return=100.0 / 98.0 - 1,
+            session_range_position=0.6,
+            session_vwap=99.0,
+            price_vs_session_vwap=100.0 / 99.0 - 1,
         )
 
     def test_long_uses_ask_and_stop_below_entry(self):
@@ -40,8 +47,12 @@ class PaperSignalTests(unittest.TestCase):
 
     def test_message_explicitly_says_no_trade_was_opened(self):
         message = format_signal_message(self.signal("long_candidate"), 99.0, 101.0)
-        self.assertIn("КАНДИДАТ НА ЛОНГ", message)
+        self.assertIn("КРАТКОСРОЧНЫЙ ОТСКОК ВВЕРХ", message)
         self.assertIn("Часовой контекст: восходящий", message)
+        self.assertIn("Сессия от открытия: +2.04%", message)
+        self.assertIn("Положение в диапазоне: 60%", message)
+        self.assertIn("Сигнал: по движению сессии", message)
+        self.assertIn("не прогноз разворота дня", message)
         self.assertIn("Реальная сделка не открыта", message)
 
 
@@ -57,6 +68,13 @@ class PaperJournalTests(unittest.TestCase):
             hourly_context="bullish",
             ema_50_hourly=101.0,
             ema_200_hourly=99.0,
+            session_open=98.0,
+            session_high=102.0,
+            session_low=97.0,
+            session_return=100.0 / 98.0 - 1,
+            session_range_position=0.6,
+            session_vwap=99.0,
+            price_vs_session_vwap=100.0 / 99.0 - 1,
         )
         with tempfile.TemporaryDirectory() as directory:
             journal = PaperJournal(Path(directory) / "paper.db")
@@ -66,6 +84,17 @@ class PaperJournalTests(unittest.TestCase):
                 self.assertFalse(journal.telegram_was_sent(signal.key))
                 journal.mark_telegram_sent(signal.key)
                 self.assertTrue(journal.telegram_was_sent(signal.key))
+                row = journal._connection.execute(
+                    """
+                    SELECT session_return, session_range_position,
+                           price_vs_session_vwap
+                    FROM paper_signals WHERE signal_key = ?
+                    """,
+                    (signal.key,),
+                ).fetchone()
+                self.assertAlmostEqual(row[0], signal.session_return)
+                self.assertAlmostEqual(row[1], 0.6)
+                self.assertAlmostEqual(row[2], signal.price_vs_session_vwap)
                 tracked = journal.tracked_signals()
                 self.assertEqual(len(tracked), 1)
                 outcome = evaluate_path(

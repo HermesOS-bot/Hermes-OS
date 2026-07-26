@@ -26,10 +26,34 @@ class PaperJournal:
                 best_ask REAL NOT NULL,
                 entry_price REAL NOT NULL,
                 stop_price REAL NOT NULL,
+                session_open REAL,
+                session_high REAL,
+                session_low REAL,
+                session_return REAL,
+                session_range_position REAL,
+                session_vwap REAL,
+                price_vs_session_vwap REAL,
                 telegram_sent INTEGER NOT NULL DEFAULT 0
             )
             """
         )
+        existing_columns = {
+            row[1]
+            for row in self._connection.execute("PRAGMA table_info(paper_signals)")
+        }
+        for column in (
+            "session_open",
+            "session_high",
+            "session_low",
+            "session_return",
+            "session_range_position",
+            "session_vwap",
+            "price_vs_session_vwap",
+        ):
+            if column not in existing_columns:
+                self._connection.execute(
+                    "ALTER TABLE paper_signals ADD COLUMN {} REAL".format(column)
+                )
         self._connection.execute(
             """
             CREATE TABLE IF NOT EXISTS paper_path_state (
@@ -88,8 +112,10 @@ class PaperJournal:
             INSERT INTO paper_signals (
                 signal_key, candle_time, observed_at, side, candle_close, rsi_14,
                 relative_volume_20, hourly_context, best_bid, best_ask,
-                entry_price, stop_price
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                entry_price, stop_price, session_open, session_high, session_low,
+                session_return, session_range_position, session_vwap,
+                price_vs_session_vwap
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 signal.key,
@@ -104,6 +130,13 @@ class PaperJournal:
                 best_ask,
                 entry_price,
                 stop_price,
+                signal.session_open,
+                signal.session_high,
+                signal.session_low,
+                signal.session_return,
+                signal.session_range_position,
+                signal.session_vwap,
+                signal.price_vs_session_vwap,
             ),
         )
         self._connection.commit()
