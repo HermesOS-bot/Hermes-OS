@@ -20,7 +20,10 @@ from core.paper_observer import (  # noqa: E402
     hypothetical_entry,
     stop_price,
 )
-from core.trend_observer import detect_latest_trend_candidate  # noqa: E402
+from core.trend_observer import (  # noqa: E402
+    detect_latest_trend_candidate,
+    format_trend_message,
+)
 from infrastructure.paper_journal import PaperJournal  # noqa: E402
 from infrastructure.tbank_market_data import TBankMarketDataClient  # noqa: E402
 from infrastructure.telegram_notifier import TelegramNotifier  # noqa: E402
@@ -66,25 +69,50 @@ def main() -> int:
             not journal.contains(signal.key)
             or not journal.telegram_was_sent(signal.key)
         )
-        needs_trend = trend is not None and not journal.trend_contains(trend.key)
-        if not needs_signal and not needs_trend:
-            print("No new RSI crossing or shadow trend candidate")
+        needs_trend_record = (
+            trend is not None and not journal.trend_contains(trend.key)
+        )
+        needs_trend_notification = trend is not None and (
+            needs_trend_record
+            or not journal.trend_telegram_was_sent(trend.key)
+        )
+        if not needs_signal and not needs_trend_notification:
+            print("No new RSI crossing or trend candidate")
             return 0
 
         book = market.get_order_book(INSTRUMENT_ID, depth=1)
         if book.best_bid is None or book.best_ask is None:
             raise RuntimeError("Order book has no bid or ask")
 
-        if needs_trend:
+        notifier = None
+
+        def get_notifier():
+            nonlocal notifier
+            if notifier is None:
+                notifier = TelegramNotifier(
+                    required_env("HERMES_TG_BOT_TOKEN"),
+                    required_env("HERMES_TG_CHAT_ID"),
+                    proxy_url=os.environ.get("TG_PROXY_URL") or None,
+                )
+            return notifier
+
+        if needs_trend_notification:
             trend_entry = hypothetical_entry(trend, book.best_bid, book.best_ask)
-            journal.add_trend_candidate(
-                trend,
-                book.best_bid,
-                book.best_ask,
-                trend_entry,
-                stop_price(trend, trend_entry),
+            if needs_trend_record:
+                journal.add_trend_candidate(
+                    trend,
+                    book.best_bid,
+                    book.best_ask,
+                    trend_entry,
+                    stop_price(trend, trend_entry),
+                )
+            else:
+                print("Retrying Telegram delivery for recorded trend candidate")
+            get_notifier().send(
+                format_trend_message(trend, book.best_bid, book.best_ask)
             )
-            print("Shadow trend candidate recorded; no Telegram notification")
+            journal.mark_trend_telegram_sent(trend.key)
+            print("Trend paper candidate recorded and sent")
 
         if needs_signal:
             entry = hypothetical_entry(signal, book.best_bid, book.best_ask)
@@ -93,12 +121,9 @@ def main() -> int:
                 journal.add(signal, book.best_bid, book.best_ask, entry, stop)
             else:
                 print("Retrying Telegram delivery for recorded RSI signal")
-            notifier = TelegramNotifier(
-                required_env("HERMES_TG_BOT_TOKEN"),
-                required_env("HERMES_TG_CHAT_ID"),
-                proxy_url=os.environ.get("TG_PROXY_URL") or None,
+            get_notifier().send(
+                format_signal_message(signal, book.best_bid, book.best_ask)
             )
-            notifier.send(format_signal_message(signal, book.best_bid, book.best_ask))
             journal.mark_telegram_sent(signal.key)
             print("RSI paper signal recorded and sent")
         return 0

@@ -115,10 +115,20 @@ class PaperJournal:
                 session_return REAL NOT NULL,
                 session_range_position REAL,
                 session_vwap REAL,
-                price_vs_session_vwap REAL
+                price_vs_session_vwap REAL,
+                telegram_sent INTEGER NOT NULL DEFAULT 0
             )
             """
         )
+        trend_columns = {
+            row[1]
+            for row in self._connection.execute("PRAGMA table_info(trend_candidates)")
+        }
+        if "telegram_sent" not in trend_columns:
+            self._connection.execute(
+                "ALTER TABLE trend_candidates "
+                "ADD COLUMN telegram_sent INTEGER NOT NULL DEFAULT 0"
+            )
         self._connection.execute(
             """
             CREATE TABLE IF NOT EXISTS trend_path_state (
@@ -127,10 +137,22 @@ class PaperJournal:
                 stop_hit_time TEXT,
                 max_favorable_return REAL,
                 max_adverse_return REAL,
+                intermediate_sent INTEGER NOT NULL DEFAULT 0,
+                final_sent INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY(signal_key) REFERENCES trend_candidates(signal_key)
             )
             """
         )
+        trend_path_columns = {
+            row[1]
+            for row in self._connection.execute("PRAGMA table_info(trend_path_state)")
+        }
+        for column in ("intermediate_sent", "final_sent"):
+            if column not in trend_path_columns:
+                self._connection.execute(
+                    "ALTER TABLE trend_path_state ADD COLUMN {} "
+                    "INTEGER NOT NULL DEFAULT 0".format(column)
+                )
         self._connection.execute(
             """
             CREATE TABLE IF NOT EXISTS trend_horizon_outcomes (
@@ -161,8 +183,14 @@ class PaperJournal:
         return row is not None
 
     def telegram_was_sent(self, signal_key: str) -> bool:
+        return self._telegram_was_sent("paper_signals", signal_key)
+
+    def trend_telegram_was_sent(self, signal_key: str) -> bool:
+        return self._telegram_was_sent("trend_candidates", signal_key)
+
+    def _telegram_was_sent(self, table: str, signal_key: str) -> bool:
         row = self._connection.execute(
-            "SELECT telegram_sent FROM paper_signals WHERE signal_key = ?",
+            "SELECT telegram_sent FROM {} WHERE signal_key = ?".format(table),
             (signal_key,),
         ).fetchone()
         return bool(row and row[0])
@@ -337,24 +365,58 @@ class PaperJournal:
         )
 
     def outcome_notification_was_sent(self, signal_key: str, final: bool) -> bool:
+        return self._outcome_notification_was_sent(
+            "paper_path_state", signal_key, final
+        )
+
+    def trend_outcome_notification_was_sent(
+        self, signal_key: str, final: bool
+    ) -> bool:
+        return self._outcome_notification_was_sent(
+            "trend_path_state", signal_key, final
+        )
+
+    def _outcome_notification_was_sent(
+        self, table: str, signal_key: str, final: bool
+    ) -> bool:
         column = "final_sent" if final else "intermediate_sent"
         row = self._connection.execute(
-            "SELECT {} FROM paper_path_state WHERE signal_key = ?".format(column),
+            "SELECT {} FROM {} WHERE signal_key = ?".format(column, table),
             (signal_key,),
         ).fetchone()
         return bool(row and row[0])
 
     def mark_outcome_notification_sent(self, signal_key: str, final: bool) -> None:
+        self._mark_outcome_notification_sent(
+            "paper_path_state", signal_key, final
+        )
+
+    def mark_trend_outcome_notification_sent(
+        self, signal_key: str, final: bool
+    ) -> None:
+        self._mark_outcome_notification_sent(
+            "trend_path_state", signal_key, final
+        )
+
+    def _mark_outcome_notification_sent(
+        self, table: str, signal_key: str, final: bool
+    ) -> None:
         column = "final_sent" if final else "intermediate_sent"
         self._connection.execute(
-            "UPDATE paper_path_state SET {} = 1 WHERE signal_key = ?".format(column),
+            "UPDATE {} SET {} = 1 WHERE signal_key = ?".format(table, column),
             (signal_key,),
         )
         self._connection.commit()
 
     def mark_telegram_sent(self, signal_key: str) -> None:
+        self._mark_telegram_sent("paper_signals", signal_key)
+
+    def mark_trend_telegram_sent(self, signal_key: str) -> None:
+        self._mark_telegram_sent("trend_candidates", signal_key)
+
+    def _mark_telegram_sent(self, table: str, signal_key: str) -> None:
         self._connection.execute(
-            "UPDATE paper_signals SET telegram_sent = 1 WHERE signal_key = ?",
+            "UPDATE {} SET telegram_sent = 1 WHERE signal_key = ?".format(table),
             (signal_key,),
         )
         self._connection.commit()

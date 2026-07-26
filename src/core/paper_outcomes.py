@@ -106,8 +106,16 @@ def format_outcome_message(
     signal: TrackedPaperSignal,
     outcome: PathOutcome,
     final: bool,
+    strategy: str = "rsi",
 ) -> str:
-    title = "📊 ИТОГ ЗА 4 ЧАСА" if final else "⏱ РЕЗУЛЬТАТ ЧЕРЕЗ ЧАС"
+    if strategy == "trend":
+        title = (
+            "📈 ТРЕНД — ИТОГ ЗА 4 ЧАСА"
+            if final
+            else "📈 ТРЕНД — РЕЗУЛЬТАТ ЧЕРЕЗ ЧАС"
+        )
+    else:
+        title = "📊 ИТОГ ЗА 4 ЧАСА" if final else "⏱ РЕЗУЛЬТАТ ЧЕРЕЗ ЧАС"
     direction = "лонг" if signal.side == "long_candidate" else "шорт"
     horizons = (120, 240) if final else (15, 30, 60)
     lines = [title + " — NEO Bitcoin", "", "Направление: " + direction]
@@ -128,7 +136,12 @@ def format_outcome_message(
                 + ("нет данных" if adverse is None else "{:+.2%}".format(adverse)),
             ]
         )
-    lines.extend(["", "Paper-наблюдение. Реальной сделки не было."])
+    label = (
+        "Трендовая paper-гипотеза. Реальной сделки не было."
+        if strategy == "trend"
+        else "Paper-наблюдение. Реальной сделки не было."
+    )
+    lines.extend(["", label])
     return "\n".join(lines)
 
 

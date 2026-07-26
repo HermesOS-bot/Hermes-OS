@@ -11,7 +11,14 @@ from typing import List, Optional
 
 from core.indicators import relative_volume, rsi
 from core.models import Candle
-from core.paper_observer import PaperSignal, _hourly_context, _session_context
+from core.paper_observer import (
+    MOSCOW,
+    PaperSignal,
+    _hourly_context,
+    _session_context,
+    hypothetical_entry,
+    stop_price,
+)
 
 
 def _continuation_side(
@@ -42,6 +49,58 @@ def _continuation_side(
     ):
         return "short_candidate"
     return None
+
+
+def format_trend_message(
+    signal: PaperSignal, best_bid: float, best_ask: float
+) -> str:
+    is_long = signal.side == "long_candidate"
+    title = "🟢 ТРЕНДОВЫЙ ЛОНГ" if is_long else "🔴 ТРЕНДОВЫЙ ШОРТ"
+    context = "восходящий" if is_long else "нисходящий"
+    midpoint = (best_bid + best_ask) / 2
+    spread = (best_ask - best_bid) / midpoint if midpoint else 0.0
+    entry = hypothetical_entry(signal, best_bid, best_ask)
+    stop = stop_price(signal, entry)
+    time_moscow = signal.observed_at.astimezone(MOSCOW).strftime(
+        "%d.%m.%Y %H:%M мск"
+    )
+    range_position = (
+        "нет данных"
+        if signal.session_range_position is None
+        else "{:.0%} от минимума к максимуму".format(
+            signal.session_range_position
+        )
+    )
+    vwap_distance = (
+        "нет данных"
+        if signal.price_vs_session_vwap is None
+        else "{:+.2%}".format(signal.price_vs_session_vwap)
+    )
+    volume = (
+        "нет данных"
+        if signal.relative_volume_20 is None
+        else "{:.2f}× среднего".format(signal.relative_volume_20)
+    )
+    return "\n".join(
+        [
+            title + " — NEO Bitcoin",
+            "",
+            "Время: " + time_moscow,
+            "Логика: продолжение движения после локального отката",
+            "RSI 14: {:.1f}".format(signal.rsi_14),
+            "Часовой контекст: " + context,
+            "Сессия от открытия: {:+.2%}".format(signal.session_return),
+            "Положение в диапазоне: " + range_position,
+            "Цена относительно VWAP: " + vwap_distance,
+            "Относительный объём: " + volume,
+            "Bid / Ask: {:,.2f} / {:,.2f}".format(best_bid, best_ask),
+            "Спред: {:.3%}".format(spread),
+            "Условный вход: {:,.2f}".format(entry),
+            "Стоп-сценарий 1%: {:,.2f}".format(stop),
+            "",
+            "Трендовая paper-гипотеза. Реальная сделка не открыта.",
+        ]
+    )
 
 
 def detect_latest_trend_candidate(

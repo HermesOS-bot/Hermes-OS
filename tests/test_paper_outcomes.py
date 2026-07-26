@@ -78,11 +78,16 @@ class PaperOutcomeTests(unittest.TestCase):
         )
         intermediate = format_outcome_message(signal, result, final=False)
         final = format_outcome_message(signal, result, final=True)
+        trend = format_outcome_message(
+            signal, result, final=False, strategy="trend"
+        )
         self.assertIn("РЕЗУЛЬТАТ ЧЕРЕЗ ЧАС", intermediate)
         self.assertIn("60 мин", intermediate)
         self.assertIn("ИТОГ ЗА 4 ЧАСА", final)
         self.assertIn("Максимум в плюс", final)
         self.assertIn("Реальной сделки не было", final)
+        self.assertIn("ТРЕНД — РЕЗУЛЬТАТ ЧЕРЕЗ ЧАС", trend)
+        self.assertIn("Трендовая paper-гипотеза", trend)
 
     def test_ignores_incomplete_candle(self):
         signal = self.signal()

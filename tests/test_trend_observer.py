@@ -10,7 +10,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from core.models import Candle
 from core.paper_observer import PaperSignal
 from core.paper_outcomes import evaluate_path
-from core.trend_observer import _continuation_side
+from core.trend_observer import _continuation_side, format_trend_message
 from infrastructure.paper_journal import PaperJournal
 
 
@@ -48,6 +48,30 @@ class TrendRuleTests(unittest.TestCase):
             previous_candle=self.previous(),
         )
         self.assertEqual(side, "short_candidate")
+
+    def test_trend_message_is_explicitly_paper_only(self):
+        signal = PaperSignal(
+            candle_time=datetime(2026, 7, 26, 10, 0, tzinfo=timezone.utc),
+            observed_at=datetime(2026, 7, 26, 10, 5, tzinfo=timezone.utc),
+            side="long_candidate",
+            candle_close=100.0,
+            rsi_14=51.0,
+            relative_volume_20=1.2,
+            hourly_context="bullish",
+            ema_50_hourly=101.0,
+            ema_200_hourly=99.0,
+            session_open=98.0,
+            session_high=101.0,
+            session_low=97.0,
+            session_return=100.0 / 98.0 - 1,
+            session_range_position=0.75,
+            session_vwap=99.0,
+            price_vs_session_vwap=100.0 / 99.0 - 1,
+        )
+        message = format_trend_message(signal, 99.9, 100.1)
+        self.assertIn("ТРЕНДОВЫЙ ЛОНГ", message)
+        self.assertIn("продолжение движения", message)
+        self.assertIn("Реальная сделка не открыта", message)
 
     def test_countertrend_candidate_is_rejected(self):
         side = _continuation_side(
@@ -88,10 +112,26 @@ class TrendJournalTests(unittest.TestCase):
                 journal.add_trend_candidate(signal, 99.9, 100.1, 100.1, 99.099)
                 self.assertTrue(journal.trend_contains(signal.key))
                 self.assertFalse(journal.contains(signal.key))
+                self.assertFalse(journal.trend_telegram_was_sent(signal.key))
+                journal.mark_trend_telegram_sent(signal.key)
+                self.assertTrue(journal.trend_telegram_was_sent(signal.key))
                 tracked = journal.tracked_trend_candidates()
                 self.assertEqual(len(tracked), 1)
                 outcome = evaluate_path(tracked[0], [], tracked[0].observed_at)
                 journal.save_trend_path_outcome(signal.key, outcome)
+                self.assertFalse(
+                    journal.trend_outcome_notification_was_sent(
+                        signal.key, final=False
+                    )
+                )
+                journal.mark_trend_outcome_notification_sent(
+                    signal.key, final=False
+                )
+                self.assertTrue(
+                    journal.trend_outcome_notification_was_sent(
+                        signal.key, final=False
+                    )
+                )
                 rows = journal._connection.execute(
                     "SELECT COUNT(*) FROM trend_path_state"
                 ).fetchone()[0]

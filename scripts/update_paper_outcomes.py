@@ -39,9 +39,14 @@ def main() -> int:
     notifications = 0
     notifier = None
 
-    def send(signal, outcome, final):
+    def send(signal, outcome, final, strategy="rsi"):
         nonlocal notifier, notifications
-        if journal.outcome_notification_was_sent(signal.key, final):
+        was_sent = (
+            journal.trend_outcome_notification_was_sent(signal.key, final)
+            if strategy == "trend"
+            else journal.outcome_notification_was_sent(signal.key, final)
+        )
+        if was_sent:
             return
         horizon = outcome.horizons[240 if final else 60]
         if now < horizon.target_time:
@@ -54,8 +59,13 @@ def main() -> int:
                 os.environ.get("HERMES_TG_CHAT_ID", "").strip(),
                 proxy_url=os.environ.get("TG_PROXY_URL") or None,
             )
-        notifier.send(format_outcome_message(signal, outcome, final))
-        journal.mark_outcome_notification_sent(signal.key, final)
+        notifier.send(
+            format_outcome_message(signal, outcome, final, strategy=strategy)
+        )
+        if strategy == "trend":
+            journal.mark_trend_outcome_notification_sent(signal.key, final)
+        else:
+            journal.mark_outcome_notification_sent(signal.key, final)
         notifications += 1
 
     try:
@@ -72,12 +82,14 @@ def main() -> int:
                 continue
             outcome = evaluate_path(signal, candles, now)
             journal.save_trend_path_outcome(signal.key, outcome)
+            send(signal, outcome, final=False, strategy="trend")
+            send(signal, outcome, final=True, strategy="trend")
             trend_updated += 1
     finally:
         journal.close()
 
     print("Updated RSI paper outcomes:", updated)
-    print("Updated shadow trend outcomes:", trend_updated)
+    print("Updated trend paper outcomes:", trend_updated)
     print("Telegram outcome notifications:", notifications)
     return 0
 
