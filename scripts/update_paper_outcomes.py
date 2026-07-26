@@ -35,6 +35,7 @@ def main() -> int:
     )
     journal = PaperJournal(JOURNAL_PATH)
     updated = 0
+    trend_updated = 0
     notifications = 0
     notifier = None
 
@@ -66,10 +67,17 @@ def main() -> int:
             send(signal, outcome, final=False)
             send(signal, outcome, final=True)
             updated += 1
+        for signal in journal.tracked_trend_candidates():
+            if signal.observed_at > now:
+                continue
+            outcome = evaluate_path(signal, candles, now)
+            journal.save_trend_path_outcome(signal.key, outcome)
+            trend_updated += 1
     finally:
         journal.close()
 
-    print("Updated paper outcomes:", updated)
+    print("Updated RSI paper outcomes:", updated)
+    print("Updated shadow trend outcomes:", trend_updated)
     print("Telegram outcome notifications:", notifications)
     return 0
 
