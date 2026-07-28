@@ -64,9 +64,11 @@ Automatic trading is intentionally **not implemented** at this stage.
 |----------|-------------|
 | `docs/VISION.md` | Long-term vision of Hermes OS |
 | `docs/ARCHITECTURE.md` | System architecture |
-| `docs/CONSTITUTION.md` | Trading rules (coming soon) |
-| `docs/ROADMAP.md` | Development roadmap (coming soon) |
-| `docs/DECISIONS.md` | Architecture decisions (coming soon) |
+| `docs/CONSTITUTION.md` | Core research and trading principles |
+| `docs/EXIT_RULES.md` | Pre-registered paper exit-rule hypotheses |
+| `docs/TREND_HYPOTHESIS.md` | Selected trend-v2 ADX/VWAP paper hypothesis |
+| `docs/ROADMAP.md` | Development roadmap |
+| `docs/DECISIONS.md` | Architecture and research decisions |
 
 ---
 
