@@ -29,10 +29,13 @@ class PaperSignal:
     session_range_position: Optional[float]
     session_vwap: Optional[float]
     price_vs_session_vwap: Optional[float]
+    adx_14_hourly: Optional[float] = None
+    strategy_version: str = ""
 
     @property
     def key(self) -> str:
-        return "{}:{}".format(self.candle_time.isoformat(), self.side)
+        base = "{}:{}".format(self.candle_time.isoformat(), self.side)
+        return "{}:{}".format(self.strategy_version, base) if self.strategy_version else base
 
 
 def _crossing_side(previous: Optional[float], current: Optional[float]) -> Optional[str]:

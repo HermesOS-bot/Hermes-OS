@@ -19,6 +19,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from core.indicators import relative_volume, rsi  # noqa: E402
 from backtest_exit_rules import (  # noqa: E402
     DATA_DIR,
+    MOSCOW,
     RESEARCH_DIR,
     hourly_context_series,
     load_candles,
@@ -58,6 +59,8 @@ def pullback_reclaim_side(
         return None
     candle = candles[index]
     previous = candles[index - 1]
+    if previous.timestamp.astimezone(MOSCOW).date() != candle.timestamp.astimezone(MOSCOW).date():
+        return None
     session_return = candle.close / session_opens[index] - 1
     short_state = 100 - rsi_state
     if (

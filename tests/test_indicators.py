@@ -5,7 +5,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from core.indicators import ema, relative_volume, rsi
+from core.indicators import directional_movement, ema, relative_volume, rsi
 
 
 class EmaTests(unittest.TestCase):
@@ -29,6 +29,20 @@ class RsiTests(unittest.TestCase):
     def test_falling_market_reaches_zero(self):
         result = rsi(list(range(20, 0, -1)), 14)
         self.assertEqual(result[14], 0)
+
+
+class DirectionalMovementTests(unittest.TestCase):
+    def test_rising_market_has_positive_direction_and_strong_adx(self):
+        closes = [100 + index for index in range(60)]
+        highs = [value + 0.5 for value in closes]
+        lows = [value - 0.5 for value in closes]
+        plus_di, minus_di, adx = directional_movement(highs, lows, closes, 14)
+        self.assertGreater(plus_di[-1], minus_di[-1])
+        self.assertGreater(adx[-1], 25)
+
+    def test_rejects_mismatched_series(self):
+        with self.assertRaises(ValueError):
+            directional_movement([1, 2], [1], [1, 2], 14)
 
 
 class RelativeVolumeTests(unittest.TestCase):

@@ -116,6 +116,8 @@ class PaperJournal:
                 session_range_position REAL,
                 session_vwap REAL,
                 price_vs_session_vwap REAL,
+                adx_14_hourly REAL,
+                strategy_version TEXT NOT NULL DEFAULT 'trend-v1',
                 telegram_sent INTEGER NOT NULL DEFAULT 0
             )
             """
@@ -128,6 +130,15 @@ class PaperJournal:
             self._connection.execute(
                 "ALTER TABLE trend_candidates "
                 "ADD COLUMN telegram_sent INTEGER NOT NULL DEFAULT 0"
+            )
+        if "adx_14_hourly" not in trend_columns:
+            self._connection.execute(
+                "ALTER TABLE trend_candidates ADD COLUMN adx_14_hourly REAL"
+            )
+        if "strategy_version" not in trend_columns:
+            self._connection.execute(
+                "ALTER TABLE trend_candidates "
+                "ADD COLUMN strategy_version TEXT NOT NULL DEFAULT 'trend-v1'"
             )
         self._connection.execute(
             """
@@ -215,9 +226,41 @@ class PaperJournal:
         entry_price: float,
         stop_price: float,
     ) -> None:
-        self._insert_signal(
-            "trend_candidates", signal, best_bid, best_ask, entry_price, stop_price
+        self._connection.execute(
+            """
+            INSERT INTO trend_candidates (
+                signal_key, candle_time, observed_at, side, candle_close, rsi_14,
+                relative_volume_20, hourly_context, best_bid, best_ask,
+                entry_price, stop_price, session_open, session_high, session_low,
+                session_return, session_range_position, session_vwap,
+                price_vs_session_vwap, adx_14_hourly, strategy_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                signal.key,
+                signal.candle_time.isoformat(),
+                signal.observed_at.isoformat(),
+                signal.side,
+                signal.candle_close,
+                signal.rsi_14,
+                signal.relative_volume_20,
+                signal.hourly_context,
+                best_bid,
+                best_ask,
+                entry_price,
+                stop_price,
+                signal.session_open,
+                signal.session_high,
+                signal.session_low,
+                signal.session_return,
+                signal.session_range_position,
+                signal.session_vwap,
+                signal.price_vs_session_vwap,
+                signal.adx_14_hourly,
+                signal.strategy_version or "trend-v1",
+            ),
         )
+        self._connection.commit()
 
     def _insert_signal(
         self,
@@ -266,7 +309,27 @@ class PaperJournal:
         return self._tracked_from("paper_signals")
 
     def tracked_trend_candidates(self):
-        return self._tracked_from("trend_candidates")
+        rows = self._connection.execute(
+            """
+            SELECT signal_key, observed_at, side, entry_price, best_bid,
+                   best_ask, stop_price, strategy_version
+            FROM trend_candidates
+            ORDER BY observed_at
+            """
+        ).fetchall()
+        return [
+            TrackedPaperSignal(
+                key=row[0],
+                observed_at=datetime.fromisoformat(row[1]),
+                side=row[2],
+                entry_price=row[3],
+                best_bid=row[4],
+                best_ask=row[5],
+                stop_price=row[6],
+                strategy_version=row[7],
+            )
+            for row in rows
+        ]
 
     def _tracked_from(self, table: str):
         rows = self._connection.execute(

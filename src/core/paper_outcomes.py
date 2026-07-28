@@ -24,6 +24,7 @@ class TrackedPaperSignal:
     best_bid: float
     best_ask: float
     stop_price: float
+    strategy_version: str = ""
 
     @property
     def spread_fraction(self) -> float:
@@ -109,10 +110,11 @@ def format_outcome_message(
     strategy: str = "rsi",
 ) -> str:
     if strategy == "trend":
+        version = " V2 — ADX/VWAP" if signal.strategy_version.startswith("trend-v2") else ""
         title = (
-            "📈 ТРЕНД — ИТОГ ЗА 4 ЧАСА"
+            "📈 ТРЕНД{} — ИТОГ ЗА 4 ЧАСА".format(version)
             if final
-            else "📈 ТРЕНД — РЕЗУЛЬТАТ ЧЕРЕЗ ЧАС"
+            else "📈 ТРЕНД{} — РЕЗУЛЬТАТ ЧЕРЕЗ ЧАС".format(version)
         )
     else:
         title = "📊 ИТОГ ЗА 4 ЧАСА" if final else "⏱ РЕЗУЛЬТАТ ЧЕРЕЗ ЧАС"
@@ -136,11 +138,12 @@ def format_outcome_message(
                 + ("нет данных" if adverse is None else "{:+.2%}".format(adverse)),
             ]
         )
-    label = (
-        "Трендовая paper-гипотеза. Реальной сделки не было."
-        if strategy == "trend"
-        else "Paper-наблюдение. Реальной сделки не было."
-    )
+    if strategy == "trend" and signal.strategy_version.startswith("trend-v2"):
+        label = "Трендовая гипотеза v2 — ADX ≥25 и возврат через VWAP. Реальной сделки не было."
+    elif strategy == "trend":
+        label = "Трендовая paper-гипотеза. Реальной сделки не было."
+    else:
+        label = "Paper-наблюдение. Реальной сделки не было."
     lines.extend(["", label])
     return "\n".join(lines)
 

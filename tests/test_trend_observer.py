@@ -1,3 +1,4 @@
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -10,7 +11,12 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from core.models import Candle
 from core.paper_observer import PaperSignal
 from core.paper_outcomes import evaluate_path
-from core.trend_observer import _continuation_side, format_trend_message
+from core.trend_observer import (
+    TREND_STRATEGY_VERSION,
+    _continuation_side,
+    _v2_reclaim_side,
+    format_trend_message,
+)
 from infrastructure.paper_journal import PaperJournal
 
 
@@ -67,11 +73,39 @@ class TrendRuleTests(unittest.TestCase):
             session_range_position=0.75,
             session_vwap=99.0,
             price_vs_session_vwap=100.0 / 99.0 - 1,
+            adx_14_hourly=27.0,
+            strategy_version=TREND_STRATEGY_VERSION,
         )
         message = format_trend_message(signal, 99.9, 100.1)
         self.assertIn("ТРЕНДОВЫЙ ЛОНГ", message)
-        self.assertIn("продолжение движения", message)
+        self.assertIn("возврат через VWAP", message)
         self.assertIn("Реальная сделка не открыта", message)
+
+    def test_v2_long_requires_adx_and_vwap_reclaim(self):
+        side = _v2_reclaim_side(
+            rsi_value=52.0,
+            hourly_context="bullish",
+            hourly_adx=27.0,
+            session_return=0.01,
+            previous_close=99.0,
+            previous_vwap=99.5,
+            current_close=100.5,
+            current_vwap=100.0,
+        )
+        self.assertEqual(side, "long_candidate")
+
+    def test_v2_rejects_weak_adx(self):
+        side = _v2_reclaim_side(
+            rsi_value=52.0,
+            hourly_context="bullish",
+            hourly_adx=24.9,
+            session_return=0.01,
+            previous_close=99.0,
+            previous_vwap=99.5,
+            current_close=100.5,
+            current_vwap=100.0,
+        )
+        self.assertIsNone(side)
 
     def test_countertrend_candidate_is_rejected(self):
         side = _continuation_side(
@@ -87,6 +121,55 @@ class TrendRuleTests(unittest.TestCase):
 
 
 class TrendJournalTests(unittest.TestCase):
+    def test_migrates_existing_v1_trend_table_without_losing_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "paper.db"
+            connection = sqlite3.connect(path)
+            connection.execute(
+                """
+                CREATE TABLE trend_candidates (
+                    signal_key TEXT PRIMARY KEY,
+                    candle_time TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    candle_close REAL NOT NULL,
+                    rsi_14 REAL NOT NULL,
+                    relative_volume_20 REAL,
+                    hourly_context TEXT NOT NULL,
+                    best_bid REAL NOT NULL,
+                    best_ask REAL NOT NULL,
+                    entry_price REAL NOT NULL,
+                    stop_price REAL NOT NULL,
+                    session_open REAL NOT NULL,
+                    session_high REAL NOT NULL,
+                    session_low REAL NOT NULL,
+                    session_return REAL NOT NULL,
+                    session_range_position REAL,
+                    session_vwap REAL,
+                    price_vs_session_vwap REAL,
+                    telegram_sent INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            connection.execute(
+                """INSERT INTO trend_candidates VALUES (
+                    'old', '2026-07-26T10:00:00+00:00',
+                    '2026-07-26T10:05:00+00:00', 'long_candidate',
+                    100, 51, 1.2, 'bullish', 99.9, 100.1, 100.1, 99.099,
+                    98, 101, 97, 0.02, 0.75, 99, 0.01, 1
+                )"""
+            )
+            connection.commit()
+            connection.close()
+            journal = PaperJournal(path)
+            try:
+                row = journal._connection.execute(
+                    "SELECT strategy_version, adx_14_hourly FROM trend_candidates WHERE signal_key = 'old'"
+                ).fetchone()
+                self.assertEqual(row, ("trend-v1", None))
+            finally:
+                journal.close()
+
     def test_records_shadow_candidate_and_outcomes_without_rsi_signal(self):
         signal = PaperSignal(
             candle_time=datetime(2026, 7, 26, 10, 0, tzinfo=timezone.utc),
@@ -105,6 +188,8 @@ class TrendJournalTests(unittest.TestCase):
             session_range_position=0.75,
             session_vwap=99.0,
             price_vs_session_vwap=100.0 / 99.0 - 1,
+            adx_14_hourly=27.0,
+            strategy_version=TREND_STRATEGY_VERSION,
         )
         with tempfile.TemporaryDirectory() as directory:
             journal = PaperJournal(Path(directory) / "paper.db")
@@ -117,6 +202,12 @@ class TrendJournalTests(unittest.TestCase):
                 self.assertTrue(journal.trend_telegram_was_sent(signal.key))
                 tracked = journal.tracked_trend_candidates()
                 self.assertEqual(len(tracked), 1)
+                self.assertEqual(tracked[0].strategy_version, TREND_STRATEGY_VERSION)
+                stored = journal._connection.execute(
+                    "SELECT strategy_version, adx_14_hourly FROM trend_candidates"
+                ).fetchone()
+                self.assertEqual(stored[0], TREND_STRATEGY_VERSION)
+                self.assertEqual(stored[1], 27.0)
                 outcome = evaluate_path(tracked[0], [], tracked[0].observed_at)
                 journal.save_trend_path_outcome(signal.key, outcome)
                 self.assertFalse(

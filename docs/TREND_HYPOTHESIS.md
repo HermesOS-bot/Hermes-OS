@@ -43,9 +43,9 @@ Fixed 60- and 240-minute outcomes remain recorded for comparison.
 
 On development periods with 5 bps round-trip costs:
 
-- P1: +2.16%;
+- P1: +2.12%;
 - P2: +3.42%;
-- combined: +5.66%;
+- combined: +5.62%;
 - maximum drawdown: -3.93%;
 - trades: 44.
 
